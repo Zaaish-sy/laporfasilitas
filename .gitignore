@@ -1,0 +1,15 @@
+# Rahasia, jangan pernah di-commit
+.env
+*.jks
+*.keystore
+keystore.properties
+local.properties
+
+# Hasil build dan dependensi
+vendor/
+node_modules/
+build/
+.gradle/
+.idea/
+*.apk
+*.aab
