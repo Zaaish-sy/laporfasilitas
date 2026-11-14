@@ -1,0 +1,25 @@
+stateDiagram-v2
+    [*] --> draft
+    draft --> menunggu_analisis: T-01
+    menunggu_analisis --> dipublikasikan: T-02
+    menunggu_analisis --> perlu_review: T-03
+    menunggu_analisis --> perlu_perbaikan: T-04
+    perlu_perbaikan --> menunggu_analisis: T-05
+    perlu_review --> dipublikasikan: T-06a
+    perlu_review --> perlu_perbaikan: T-06b
+    perlu_review --> ditolak: T-06c
+    dipublikasikan --> menunggu_tindak_lanjut: T-07
+    menunggu_tindak_lanjut --> dalam_penanganan: T-08
+    dalam_penanganan --> menunggu_tindak_lanjut: T-09
+    dalam_penanganan --> menunggu_konfirmasi: T-10
+    menunggu_konfirmasi --> dalam_penanganan: T-11
+    menunggu_konfirmasi --> selesai: T-12
+    selesai --> dibuka_kembali: T-13
+    dibuka_kembali --> menunggu_tindak_lanjut: T-14
+    dipublikasikan --> ditolak: T-15
+    menunggu_tindak_lanjut --> ditolak: T-15
+    dalam_penanganan --> ditolak: T-15
+    menunggu_konfirmasi --> ditolak: T-15
+    selesai --> ditolak: T-15
+    dibuka_kembali --> ditolak: T-15
+    ditolak --> [*]

@@ -1,0 +1,808 @@
+openapi: 3.0.3
+info:
+  title: LaporFasilitas API
+  version: 0.1.0-draft
+  description: |
+    Kontrak API LaporFasilitas (platform independen berbasis komunitas, pilot Samarinda).
+    BUKAN aplikasi resmi pemerintah; tidak ada integrasi instansi.
+
+    Aturan yang berlaku untuk SEMUA endpoint:
+    - Klien hanya mengirim AKSI. Status laporan tidak pernah dikirim klien; backend yang memutuskan
+      transisi lewat ReportStateMachine (T-01..T-15, lihat x-transition pada tiap operasi).
+    - Konfirmasi komunitas dan hasil AI tidak mengubah status menjadi Selesai (F6, F4).
+    - x-roles = peran yang boleh memanggil. Kepemilikan (pemilik laporan / pemegang klaim) dicek di backend.
+    - Idempotensi: POST /reports memakai client_uuid; unggah foto memakai sha256 berkas.
+servers:
+  - url: https://api.example.invalid/api/v1
+    description: "Placeholder. Ganti dengan alamat server publik yang stabil (Keputusan #12)."
+security:
+  - bearerAuth: []
+tags:
+  - {name: Auth}
+  - {name: Akun}
+  - {name: Laporan}
+  - {name: Komunitas}
+  - {name: Tindak lanjut}
+  - {name: Moderasi}
+  - {name: Admin}
+  - {name: Geo}
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      security: []
+      summary: Registrasi (UC-01)
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RegisterRequest'}}}}
+      responses:
+        '201': {description: Akun dibuat; email verifikasi dikirim, content: {application/json: {schema: {$ref: '#/components/schemas/User'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Invalid'}
+  /auth/verify-email:
+    post:
+      tags: [Auth]
+      operationId: verifyEmail
+      security: []
+      summary: Verifikasi email (UC-01)
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [token], properties: {token: {type: string}}}}}}
+      responses:
+        '204': {description: Terverifikasi}
+        '422': {$ref: '#/components/responses/Invalid'}
+  /auth/resend-verification:
+    post:
+      tags: [Auth]
+      operationId: resendVerification
+      security: []
+      summary: Kirim ulang email verifikasi (dibatasi lajunya)
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [email], properties: {email: {type: string, format: email}}}}}}
+      responses:
+        '202': {description: Diproses (selalu 202 agar tidak membocorkan keberadaan akun)}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      security: []
+      summary: Login (UC-02)
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/LoginRequest'}}}}
+      responses:
+        '200': {description: Token, content: {application/json: {schema: {$ref: '#/components/schemas/Tokens'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshToken
+      security: []
+      summary: Perbarui token
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [refresh_token], properties: {refresh_token: {type: string}}}}}}
+      responses:
+        '200': {description: Token baru, content: {application/json: {schema: {$ref: '#/components/schemas/Tokens'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Logout (cabut refresh token)
+      responses:
+        '204': {description: Keluar}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /me:
+    get:
+      tags: [Akun]
+      operationId: getMe
+      summary: Profil sendiri (UC-02)
+      x-roles: [pengguna, volunteer, admin]
+      responses:
+        '200': {description: Profil, content: {application/json: {schema: {$ref: '#/components/schemas/User'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    patch:
+      tags: [Akun]
+      operationId: updateMe
+      summary: Ubah profil
+      x-roles: [pengguna, volunteer, admin]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, properties: {display_name: {type: string}}}}}}
+      responses:
+        '200': {description: Profil, content: {application/json: {schema: {$ref: '#/components/schemas/User'}}}}
+        '422': {$ref: '#/components/responses/Invalid'}
+    delete:
+      tags: [Akun]
+      operationId: deleteMe
+      summary: Hapus akun (anonimisasi; riwayat laporan tetap utuh). Wajib ada untuk Google Play.
+      x-roles: [pengguna, volunteer]
+      responses:
+        '204': {description: Akun dianonimkan}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /me/password:
+    post:
+      tags: [Akun]
+      operationId: changePassword
+      summary: Ubah password
+      x-roles: [pengguna, volunteer, admin]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [current_password, new_password], properties: {current_password: {type: string, format: password}, new_password: {type: string, format: password, minLength: 8}}}}}}
+      responses:
+        '204': {description: Diubah}
+        '422': {$ref: '#/components/responses/Invalid'}
+  /notifications:
+    get:
+      tags: [Akun]
+      operationId: listNotifications
+      summary: Notifikasi dalam aplikasi (polling; FCM ditunda) (UC-11)
+      x-roles: [pengguna, volunteer, admin]
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Daftar, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationList'}}}}
+  /notifications/{id}/read:
+    patch:
+      tags: [Akun]
+      operationId: markNotificationRead
+      x-roles: [pengguna, volunteer, admin]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      responses:
+        '204': {description: Ditandai dibaca}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /categories:
+    get:
+      tags: [Laporan]
+      operationId: listCategories
+      summary: Kategori aktif
+      x-roles: [pengguna, volunteer, admin]
+      responses:
+        '200': {description: Daftar, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Category'}}}}}
+
+  /geo/search:
+    get:
+      tags: [Geo]
+      operationId: geoSearch
+      summary: Cari alamat. Hanya dipicu tombol cari (BUKAN autocomplete), lewat proxy dengan cache dan batas 1 permintaan/detik.
+      x-roles: [pengguna, volunteer, admin]
+      parameters: [{name: q, in: query, required: true, schema: {type: string, minLength: 3}}]
+      responses:
+        '200': {description: Hasil, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/GeoResult'}}}}}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {description: Penyedia geocoding tidak tersedia; pengguna tetap bisa memilih titik di peta}
+  /geo/reverse:
+    get:
+      tags: [Geo]
+      operationId: geoReverse
+      summary: Koordinat ke alamat (cache). Kegagalan tidak boleh memblokir laporan.
+      x-roles: [pengguna, volunteer, admin]
+      parameters:
+        - {name: lat, in: query, required: true, schema: {type: number}}
+        - {name: lon, in: query, required: true, schema: {type: number}}
+      responses:
+        '200': {description: Alamat atau null, content: {application/json: {schema: {$ref: '#/components/schemas/GeoResult'}}}}
+        '429': {$ref: '#/components/responses/RateLimited'}
+
+  /reports:
+    post:
+      tags: [Laporan]
+      operationId: createReport
+      summary: Buat laporan berstatus Draft di server (UC-04). Idempoten via client_uuid.
+      x-roles: [pengguna, volunteer]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReportCreate'}}}}
+      responses:
+        '201': {description: Draft dibuat, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+        '200': {description: client_uuid sudah ada; laporan yang sudah tersimpan dikembalikan, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Invalid'}
+    get:
+      tags: [Laporan]
+      operationId: listPublicReports
+      summary: "Daftar/peta laporan publik (UC-03). Hanya status publik. Wajib login (Keputusan #9)."
+      x-roles: [pengguna, volunteer, admin]
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - {name: category_id, in: query, schema: {type: integer}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/ReportStatus'}}
+        - {name: bbox, in: query, description: 'min_lon,min_lat,max_lon,max_lat', schema: {type: string, example: '117.10,-0.55,117.20,-0.45'}}
+      responses:
+        '200': {description: Daftar, content: {application/json: {schema: {$ref: '#/components/schemas/ReportList'}}}}
+  /reports/mine:
+    get:
+      tags: [Laporan]
+      operationId: listMyReports
+      summary: Riwayat laporan sendiri (UC-05)
+      x-roles: [pengguna, volunteer]
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/ReportStatus'}}
+      responses:
+        '200': {description: Daftar, content: {application/json: {schema: {$ref: '#/components/schemas/ReportList'}}}}
+  /reports/{id}:
+    get:
+      tags: [Laporan]
+      operationId: getReport
+      summary: Detail. Pemilik/moderator melihat lengkap; lainnya hanya laporan berstatus publik.
+      x-roles: [pengguna, volunteer, admin]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      responses:
+        '200': {description: Detail, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Laporan]
+      operationId: updateReport
+      summary: Ubah draft. Hanya status draft atau perlu_perbaikan, hanya pemilik.
+      x-roles: [pengguna, volunteer]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReportUpdate'}}}}
+      responses:
+        '200': {description: Diperbarui, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Invalid'}
+  /reports/{id}/images:
+    post:
+      tags: [Laporan]
+      operationId: uploadReportImage
+      summary: Unggah foto (idempoten via sha256). Validasi tipe dan ukuran.
+      x-roles: [pengguna, volunteer]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, sha256]
+              properties:
+                file: {type: string, format: binary}
+                sha256: {type: string, minLength: 64, maxLength: 64}
+                taken_at: {type: string, format: date-time}
+      responses:
+        '201': {description: Tersimpan, content: {application/json: {schema: {$ref: '#/components/schemas/ImageRef'}}}}
+        '200': {description: Foto sama sudah ada, content: {application/json: {schema: {$ref: '#/components/schemas/ImageRef'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Invalid'}
+  /reports/{id}/submit:
+    post:
+      tags: [Laporan]
+      operationId: submitReport
+      summary: Kirim laporan. Draft -> menunggu_analisis (T-01); perlu_perbaikan -> menunggu_analisis (T-05). Analisis AI berjalan asinkron (A-14).
+      x-roles: [pengguna, volunteer]
+      x-transition: [T-01, T-05]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      responses:
+        '202': {description: Diterima untuk dianalisis, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Invalid'}
+  /reports/{id}/history:
+    get:
+      tags: [Laporan]
+      operationId: getReportHistory
+      summary: Riwayat status (UC-05). Alasan internal moderasi tidak ditampilkan ke publik.
+      x-roles: [pengguna, volunteer, admin]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      responses:
+        '200': {description: Riwayat, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/StatusHistoryItem'}}}}}
+  /reports/{id}/analysis:
+    get:
+      tags: [Laporan]
+      operationId: getReportAnalysis
+      summary: Hasil AI. Pemilik, volunteer, admin. Confidence bukan persentase kebenaran laporan (F4).
+      x-roles: [pengguna, volunteer, admin]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      responses:
+        '200': {description: Hasil, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AIAnalysis'}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /reports/{id}/confirmations:
+    post:
+      tags: [Komunitas]
+      operationId: confirmReport
+      summary: Konfirmasi komunitas (UC-06). TIDAK mengubah status (F6). Pelapor tidak boleh mengonfirmasi laporannya sendiri (A-12).
+      x-roles: [pengguna, volunteer]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [type], properties: {type: {$ref: '#/components/schemas/ConfirmationType'}}}}}}
+      responses:
+        '201': {description: Tersimpan}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /reports/{id}/flags:
+    post:
+      tags: [Komunitas]
+      operationId: flagReport
+      summary: Laporkan konten melanggar (UC-10). Tidak langsung menyembunyikan laporan.
+      x-roles: [pengguna, volunteer]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [reason], properties: {reason: {type: string, minLength: 1}}}}}}
+      responses:
+        '201': {description: Diterima}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /reports/{id}/claims:
+    post:
+      tags: [Tindak lanjut]
+      operationId: claimReport
+      summary: Menyatakan bersedia menangani (UC-07). menunggu_tindak_lanjut -> dalam_penanganan. Wajib online (A-13).
+      x-roles: [pengguna, volunteer]
+      x-transition: [T-08]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      responses:
+        '201': {description: Klaim aktif, content: {application/json: {schema: {$ref: '#/components/schemas/Claim'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /reports/{id}/reopen-requests:
+    post:
+      tags: [Tindak lanjut]
+      operationId: createReopenRequest
+      summary: Ajukan konfirmasi ulang untuk laporan Selesai (UC-09). Belum mengubah status.
+      x-roles: [pengguna, volunteer]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo: {type: string, format: binary}
+                note: {type: string}
+      responses:
+        '201': {description: Pengajuan tersimpan}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /claims/{id}/release:
+    post:
+      tags: [Tindak lanjut]
+      operationId: releaseClaim
+      summary: Lepas klaim (dalam_penanganan -> menunggu_tindak_lanjut)
+      x-roles: [pengguna, volunteer]
+      x-transition: [T-09]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [reason], properties: {reason: {type: string}}}}}}
+      responses:
+        '200': {description: Dilepas, content: {application/json: {schema: {$ref: '#/components/schemas/Claim'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /claims/{id}/evidence:
+    post:
+      tags: [Tindak lanjut]
+      operationId: submitEvidence
+      summary: Kirim bukti penanganan (UC-08). dalam_penanganan -> menunggu_konfirmasi. Hanya pemegang klaim aktif.
+      x-roles: [pengguna, volunteer]
+      x-transition: [T-10]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo_after]
+              properties:
+                photo_before: {type: string, format: binary}
+                photo_after: {type: string, format: binary}
+                note: {type: string}
+                lat: {type: number}
+                lon: {type: number}
+      responses:
+        '201': {description: Bukti tersimpan, content: {application/json: {schema: {$ref: '#/components/schemas/Evidence'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Invalid'}
+
+  /moderation/queue:
+    get:
+      tags: [Moderasi]
+      operationId: moderationQueue
+      summary: Antrean review (laporan perlu_review dan bukti menunggu pemeriksaan) (UC-12)
+      x-roles: [volunteer, admin]
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Antrean, content: {application/json: {schema: {$ref: '#/components/schemas/ModerationQueue'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /moderation/reports/{id}/recommendation:
+    post:
+      tags: [Moderasi]
+      operationId: recommendReport
+      summary: Rekomendasi volunteer atas laporan (UC-12, UC-13). TIDAK mengubah status (F7).
+      x-roles: [volunteer, admin]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Recommendation'}}}}
+      responses:
+        '201': {description: Tersimpan}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /moderation/evidence/{id}/recommendation:
+    post:
+      tags: [Moderasi]
+      operationId: recommendEvidence
+      summary: Rekomendasi volunteer atas bukti penanganan (UC-14). TIDAK mengubah status.
+      x-roles: [volunteer, admin]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Recommendation'}}}}
+      responses:
+        '201': {description: Tersimpan}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /admin/reports/{id}/decision:
+    post:
+      tags: [Admin]
+      operationId: decideReport
+      summary: Keputusan atas laporan perlu_review (UC-15). Alasan wajib untuk request_fix dan reject.
+      x-roles: [admin]
+      x-transition: [T-06a, T-06b, T-06c, T-15]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReportDecision'}}}}
+      responses:
+        '200': {description: Laporan setelah keputusan, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Invalid'}
+  /admin/evidence/{id}/decision:
+    post:
+      tags: [Admin]
+      operationId: decideEvidence
+      summary: approve -> Selesai (T-12, satu-satunya jalan); reject -> kembali dalam_penanganan (T-11).
+      x-roles: [admin]
+      x-transition: [T-11, T-12]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewDecision'}}}}
+      responses:
+        '200': {description: Laporan setelah keputusan, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Invalid'}
+  /admin/reopen-requests/{id}/decision:
+    post:
+      tags: [Admin]
+      operationId: decideReopen
+      summary: "approve -> dibuka_kembali (T-13) lalu menunggu_tindak_lanjut (T-14). Bentuk: buka kembali laporan lama (Keputusan #6)."
+      x-roles: [admin]
+      x-transition: [T-13, T-14]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewDecision'}}}}
+      responses:
+        '200': {description: Laporan setelah keputusan, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /admin/flags:
+    get:
+      tags: [Admin]
+      operationId: listFlags
+      summary: Daftar laporan konten (UC-18)
+      x-roles: [admin]
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Daftar, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Flag'}}}}}
+  /admin/flags/{id}/resolve:
+    post:
+      tags: [Admin]
+      operationId: resolveFlag
+      summary: Selesaikan flag; opsional takedown (T-15, alasan wajib)
+      x-roles: [admin]
+      x-transition: [T-15]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [takedown], properties: {takedown: {type: boolean}, reason: {type: string}}}}}}
+      responses:
+        '200': {description: Flag diselesaikan}
+        '422': {$ref: '#/components/responses/Invalid'}
+  /admin/users:
+    get:
+      tags: [Admin]
+      operationId: listUsers
+      summary: Daftar pengguna (UC-18)
+      x-roles: [admin]
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Daftar, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/User'}}}}}
+  /admin/users/{id}:
+    patch:
+      tags: [Admin]
+      operationId: updateUser
+      summary: Nonaktifkan/aktifkan akun. Dicatat di audit_logs.
+      x-roles: [admin]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, properties: {disabled: {type: boolean}}}}}}
+      responses:
+        '200': {description: Diperbarui, content: {application/json: {schema: {$ref: '#/components/schemas/User'}}}}
+  /admin/users/{id}/role:
+    post:
+      tags: [Admin]
+      operationId: setUserRole
+      summary: Angkat/turunkan volunteer. Dicatat di audit_logs.
+      x-roles: [admin]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [role], properties: {role: {type: string, enum: [pengguna, volunteer]}}}}}}
+      responses:
+        '200': {description: Diperbarui, content: {application/json: {schema: {$ref: '#/components/schemas/User'}}}}
+        '422': {$ref: '#/components/responses/Invalid'}
+  /admin/categories:
+    get:
+      tags: [Admin]
+      operationId: adminListCategories
+      summary: Semua kategori termasuk nonaktif (UC-19)
+      x-roles: [admin]
+      responses:
+        '200': {description: Daftar, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Category'}}}}}
+    post:
+      tags: [Admin]
+      operationId: adminCreateCategory
+      x-roles: [admin]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name], properties: {name: {type: string}}}}}}
+      responses:
+        '201': {description: Dibuat, content: {application/json: {schema: {$ref: '#/components/schemas/Category'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /admin/categories/{id}:
+    patch:
+      tags: [Admin]
+      operationId: adminUpdateCategory
+      summary: Ubah nama / nonaktifkan. Kategori terpakai hanya dinonaktifkan, tidak dihapus.
+      x-roles: [admin]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, properties: {name: {type: string}, active: {type: boolean}}}}}}
+      responses:
+        '200': {description: Diperbarui, content: {application/json: {schema: {$ref: '#/components/schemas/Category'}}}}
+  /admin/stats:
+    get:
+      tags: [Admin]
+      operationId: adminStats
+      summary: Statistik (UC-20)
+      x-roles: [admin]
+      responses:
+        '200': {description: Statistik, content: {application/json: {schema: {$ref: '#/components/schemas/Stats'}}}}
+  /admin/audit-logs:
+    get:
+      tags: [Admin]
+      operationId: adminAuditLogs
+      summary: Audit log, hanya baca (UC-20)
+      x-roles: [admin]
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Daftar, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AuditLog'}}}}}
+
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer}
+  parameters:
+    IdPath: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    Cursor: {name: cursor, in: query, schema: {type: string}, description: Kursor paginasi dari next_cursor}
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+  responses:
+    Unauthorized: {description: Belum login atau token tidak valid, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Forbidden: {description: 'Peran atau kepemilikan tidak sesuai (code: forbidden)', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    NotFound: {description: Tidak ditemukan, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Conflict: {description: 'Transisi tidak sah, guard gagal, atau konflik data (code: invalid_transition | guard_failed | duplicate)', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Invalid: {description: 'Validasi gagal (code: validation_failed | reason_required)', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    RateLimited: {description: Melewati batas laju, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string, example: invalid_transition}
+        message: {type: string}
+        details: {type: object, additionalProperties: true}
+    ReportStatus:
+      type: string
+      description: Sama dengan App\Domain\ReportStatus dan enum report_status di db/schema.sql.
+      enum: [draft, menunggu_analisis, perlu_review, perlu_perbaikan, ditolak, dipublikasikan, menunggu_tindak_lanjut, dalam_penanganan, menunggu_konfirmasi, selesai, dibuka_kembali]
+    ConfirmationType:
+      type: string
+      enum: [juga_melihat, masih_terjadi, tampak_diperbaiki]
+    VerificationResult:
+      type: string
+      enum: [passed, needs_review, rejected]
+    RegisterRequest:
+      type: object
+      required: [email, password, display_name]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, format: password, minLength: 8}
+        display_name: {type: string, minLength: 2}
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, format: password}
+    Tokens:
+      type: object
+      required: [access_token, refresh_token, expires_in]
+      properties:
+        access_token: {type: string}
+        refresh_token: {type: string}
+        expires_in: {type: integer, description: Detik}
+    User:
+      type: object
+      required: [id, display_name, role]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email, description: Hanya untuk pemilik akun dan admin}
+        display_name: {type: string}
+        role: {type: string, enum: [pengguna, volunteer, admin]}
+        email_verified: {type: boolean}
+    Category:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        active: {type: boolean}
+    Location:
+      type: object
+      required: [lat, lon, source]
+      properties:
+        lat: {type: number, minimum: -90, maximum: 90}
+        lon: {type: number, minimum: -180, maximum: 180}
+        address: {type: string, nullable: true}
+        source: {type: string, enum: [gps, manual]}
+    GeoResult:
+      type: object
+      properties:
+        lat: {type: number}
+        lon: {type: number}
+        display_name: {type: string, nullable: true}
+    ReportCreate:
+      type: object
+      required: [client_uuid, category_id, title, location]
+      properties:
+        client_uuid: {type: string, format: uuid, description: Dibuat di perangkat (A-08)}
+        category_id: {type: integer}
+        title: {type: string, minLength: 3, maxLength: 150}
+        description: {type: string}
+        location: {$ref: '#/components/schemas/Location'}
+    ReportUpdate:
+      type: object
+      properties:
+        category_id: {type: integer}
+        title: {type: string, minLength: 3, maxLength: 150}
+        description: {type: string}
+        location: {$ref: '#/components/schemas/Location'}
+    ImageRef:
+      type: object
+      required: [id, url]
+      properties:
+        id: {type: string, format: uuid}
+        url: {type: string, description: URL bertanda tangan berumur pendek}
+    Report:
+      type: object
+      required: [id, status, category_id, title, location, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        client_uuid: {type: string, format: uuid}
+        status: {$ref: '#/components/schemas/ReportStatus'}
+        category_id: {type: integer}
+        title: {type: string}
+        description: {type: string}
+        location: {$ref: '#/components/schemas/Location'}
+        images: {type: array, items: {$ref: '#/components/schemas/ImageRef'}}
+        reporter_display_name: {type: string, description: Tanpa email atau data pribadi (PRD 9.2)}
+        confirmation_count: {type: integer}
+        active_claim: {type: boolean, description: Ada pihak yang sedang menangani}
+        reason: {type: string, nullable: true, description: 'Alasan terakhir (mis. perlu_perbaikan atau ditolak) bagi pemilik'}
+        parent_report_id: {type: string, format: uuid, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ReportList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Report'}}
+        next_cursor: {type: string, nullable: true}
+    AIAnalysis:
+      type: object
+      required: [verification_result, model_version, threshold_version]
+      properties:
+        image_id: {type: string, format: uuid}
+        predicted_class: {type: string, nullable: true}
+        confidence: {type: number, minimum: 0, maximum: 1, nullable: true, description: Bukan persentase kebenaran laporan}
+        category_match: {type: boolean, nullable: true}
+        image_quality: {type: string, nullable: true}
+        verification_result: {$ref: '#/components/schemas/VerificationResult'}
+        model_version: {type: string}
+        threshold_version: {type: string}
+    StatusHistoryItem:
+      type: object
+      required: [to_status, changed_at]
+      properties:
+        from_status: {$ref: '#/components/schemas/ReportStatus'}
+        to_status: {$ref: '#/components/schemas/ReportStatus'}
+        transition_id: {type: string, example: T-12}
+        actor_display_name: {type: string, nullable: true}
+        reason: {type: string, nullable: true}
+        changed_at: {type: string, format: date-time}
+    Claim:
+      type: object
+      required: [id, report_id, state]
+      properties:
+        id: {type: string, format: uuid}
+        report_id: {type: string, format: uuid}
+        state: {type: string, enum: [active, released, completed]}
+        claimed_at: {type: string, format: date-time}
+    Evidence:
+      type: object
+      required: [id, claim_id, review_state]
+      properties:
+        id: {type: string, format: uuid}
+        claim_id: {type: string, format: uuid}
+        review_state: {type: string, enum: [pending, approved, rejected]}
+        photo_before_url: {type: string, nullable: true}
+        photo_after_url: {type: string}
+        note: {type: string, nullable: true}
+    Recommendation:
+      type: object
+      required: [recommendation]
+      properties:
+        recommendation: {type: string, enum: [layak, perbaikan, tidak_valid]}
+        note: {type: string}
+    ReportDecision:
+      type: object
+      required: [action]
+      properties:
+        action: {type: string, enum: [publish, request_fix, reject, mark_duplicate, takedown]}
+        reason: {type: string, description: 'Wajib untuk request_fix, reject, mark_duplicate, takedown'}
+        duplicate_of: {type: string, format: uuid, description: Untuk mark_duplicate}
+    ReviewDecision:
+      type: object
+      required: [decision]
+      properties:
+        decision: {type: string, enum: [approve, reject]}
+        reason: {type: string, description: Wajib untuk reject}
+    ModerationQueue:
+      type: object
+      properties:
+        reports: {type: array, items: {$ref: '#/components/schemas/Report'}}
+        evidence: {type: array, items: {$ref: '#/components/schemas/Evidence'}}
+        next_cursor: {type: string, nullable: true}
+    Flag:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        report_id: {type: string, format: uuid}
+        reason: {type: string}
+        state: {type: string, enum: [open, resolved]}
+    Notification:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        type: {type: string}
+        report_id: {type: string, format: uuid, nullable: true}
+        body: {type: string}
+        read: {type: boolean}
+        created_at: {type: string, format: date-time}
+    NotificationList:
+      type: object
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Notification'}}
+        next_cursor: {type: string, nullable: true}
+    Stats:
+      type: object
+      properties:
+        by_status: {type: object, additionalProperties: {type: integer}}
+        by_category: {type: object, additionalProperties: {type: integer}}
+        needs_review_count: {type: integer}
+    AuditLog:
+      type: object
+      properties:
+        id: {type: integer}
+        actor_id: {type: string, format: uuid, nullable: true}
+        action: {type: string}
+        target_type: {type: string}
+        target_id: {type: string}
+        at: {type: string, format: date-time}
+    AIServiceRequest:
+      type: object
+      description: Kontrak INTERNAL backend -> AI Service (bukan endpoint publik).
+      required: [job_id, image_url, selected_category]
+      properties:
+        job_id: {type: string, format: uuid}
+        image_url: {type: string, description: URL bertanda tangan berumur pendek}
+        selected_category: {type: string}
+    AIServiceResponse:
+      type: object
+      description: |
+        Kontrak INTERNAL AI Service -> backend. AI TIDAK mengubah status dan TIDAK menghitung
+        verification_result; backend menghitungnya dari respons ini dan threshold_version (F4, F11).
+      required: [job_id, predicted_class, confidence, category_match, image_quality, model_version]
+      properties:
+        job_id: {type: string, format: uuid}
+        predicted_class: {type: string}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        category_match: {type: boolean}
+        image_quality: {type: string}
+        model_version: {type: string}
