@@ -33,6 +33,16 @@ final class ApiException extends \DomainException
         return new self($message, 401, 'unauthorized');
     }
 
+    public static function forbidden(string $message, string $code = 'forbidden'): self
+    {
+        return new self($message, 403, $code);
+    }
+
+    public static function conflict(string $message, string $code): self
+    {
+        return new self($message, 409, $code);
+    }
+
     public static function notFound(string $what): self
     {
         return new self("{$what} tidak ditemukan.", 404, 'not_found');

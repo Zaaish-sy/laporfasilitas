@@ -75,6 +75,8 @@ MAIL_MAILER=log
 
 LAPOR_AUTO_PUBLISH=false
 LAPOR_REQUIRE_EMAIL_VERIFICATION=false
+# Placeholder (Keputusan #23): LAPOR_MAX_IMAGES=5, LAPOR_MAX_IMAGE_KB=5120
+# Ambang AI: biarkan KOSONG sampai ada hasil evaluasi model (LAPOR_AI_PASS_MIN, LAPOR_AI_THRESHOLD_VERSION)
 ```
 
 `SESSION_DRIVER`/`CACHE_STORE`/`QUEUE_CONNECTION` diubah agar Laravel tidak mencari tabel `sessions`/`cache`/`jobs` yang tidak kita buat.
@@ -129,7 +131,20 @@ $t = Invoke-RestMethod "$b/auth/login" -Method Post -ContentType "application/js
 Invoke-RestMethod "$b/me" -Headers @{ Authorization = "Bearer $($t.access_token)" }
 ```
 
-Hasil yang benar: register menampilkan pengguna dengan `email_verified: False`, login menampilkan `access_token`, dan `/me` menampilkan profil.
+Uji laporan (lanjutan, setelah `$t` di atas; butuh satu berkas gambar `foto.jpg`):
+
+```powershell
+$h = @{ Authorization = "Bearer $($t.access_token)" }
+$r = Invoke-RestMethod "$b/reports" -Method Post -Headers $h -ContentType "application/json" -Body '{"client_uuid":"11111111-1111-4111-8111-111111111111","category_id":1,"title":"Jalan berlubang","location":{"lat":-0.5,"lon":117.15,"source":"gps"}}'
+curl.exe -s -H "Authorization: Bearer $($t.access_token)" -F "file=@foto.jpg" "$b/reports/$($r.id)/images"
+Invoke-RestMethod "$b/reports/$($r.id)/submit" -Method Post -Headers $h
+Invoke-RestMethod "$b/reports/$($r.id)" -Headers $h
+```
+
+Hasil yang benar: setelah `submit`, status berubah menjadi `perlu_review` (AI masih stub, jadi tidak ada yang lolos otomatis).
+Mengirim `POST /reports` dua kali dengan `client_uuid` yang sama harus menjawab 200 dengan laporan yang sama, bukan membuat laporan baru.
+
+Hasil yang benar untuk uji auth: register menampilkan pengguna dengan `email_verified: False`, login menampilkan `access_token`, dan `/me` menampilkan profil.
 Tanpa token, `/me` harus menjawab 401 dengan `{ "code": "unauthorized", ... }`.
 
 ## Galat yang mungkin muncul (perkiraan, belum teruji)

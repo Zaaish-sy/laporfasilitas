@@ -28,9 +28,11 @@ Status: **usulan bawaan, belum dikonfirmasi pemilik proyek.** Ubah baris mana pu
 | 12 | Infrastruktur | Laravel + PostgreSQL (PRD); admin sebagai halaman web di aplikasi yang sama; foto di penyimpanan server; **tanpa PostGIS** (lat/lon + bounding box) | Skema lokasi |
 | 13 | Notifikasi | Polling dalam aplikasi; FCM ditunda | Endpoint device |
 | 14 | Login | Email + password, token bearer opak (hanya hash disimpan) dengan refresh token yang dirotasi. Masa berlaku usulan: access 1 jam, refresh 30 hari (#18 terbuka) | Auth |
+| 16 | Pengiriman ulang laporan (A-16) | Hanya foto BARU yang dianalisis ulang; kirim ulang tanpa foto baru langsung ke Perlu Review | `AnalysisProcessor` |
+| 17 | Foto disajikan | Lewat endpoint terautentikasi `/images/{id}/file`, tanpa URL publik/bertanda tangan | Kontrak foto |
 | 15 | Verifikasi email | Tabel dan alur ada; **belum ada penyedia SMTP**. Untuk uji tertutup, syarat verifikasi dimatikan (`LAPOR_REQUIRE_EMAIL_VERIFICATION=false`) agar 12 tester tidak terblokir | Keputusan penyedia email |
 
-Keputusan yang **belum** bisa diputuskan sendiri (butuh data atau pihak lain): penyedia email/SMTP; kategori dan model AI beserta ambangnya;
+Keputusan yang **belum** bisa diputuskan sendiri (butuh data atau pihak lain): penyedia email/SMTP; **koordinat batas area pilot Samarinda** (`pilot_bounds` masih null, pemeriksaan area mati); **ambang lolos AI** (`pass_min_confidence` masih null); batas foto per laporan dan ukuran berkas (nilai di kode hanya placeholder: 5 foto, 5120 KB); penghapusan EXIF; kategori dan model AI beserta ambangnya;
 batas ukuran/jumlah foto dan angka rate limit; retensi foto dan data; ketentuan nama pengembang di toko (prodi).
 
 ## 3. Cakupan

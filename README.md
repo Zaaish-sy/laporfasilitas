@@ -1,4 +1,4 @@
-# LaporFasilitas: fondasi pengembangan (v0.2)
+# LaporFasilitas: fondasi pengembangan (v0.3)
 
 Platform pelaporan fasilitas umum **independen berbasis komunitas**, pilot Kota Samarinda.
 **Bukan aplikasi resmi pemerintah**, tidak ada integrasi instansi, dan perbaikan tidak dijamin.
@@ -10,10 +10,10 @@ membangun terhadap berkas yang sama, bukan menafsirkan PRD sendiri-sendiri.
 
 | Lokasi | Fungsi | Sumber kebenaran untuk |
 |---|---|---|
-| `docs/openapi.yaml` | Kontrak API (41 path, 46 operasi) | Bentuk request/response, peran (`x-roles`), transisi (`x-transition`) |
+| `docs/openapi.yaml` | Kontrak API (42 path, 47 operasi) | Bentuk request/response, peran (`x-roles`), transisi (`x-transition`) |
 | `db/schema.sql` | Skema PostgreSQL 16 | Struktur data dan constraint (idempotensi, satu klaim aktif, riwayat append-only) |
 | `core/src/Domain/` | State machine status T-01..T-15 | Siapa boleh mengubah status apa, dan syaratnya |
-| `core/src/Application/` | `AuthService`, `ReportTransitions` (PHP murni + PDO) | Aturan akun/token dan perubahan status yang atomik |
+| `core/src/Application/` | `AuthService`, `ReportTransitions`, `ReportService`, `AnalysisProcessor`, kontrak AI + stub (PHP murni + PDO) | Aturan akun/token, perubahan status atomik, modul laporan, pipeline analisis AI |
 | `core/tests/` | Uji state machine dan uji integrasi ke PostgreSQL asli | Bukti perilaku di atas |
 | `backend-overlay/` | Lapisan Laravel tipis (provider, middleware, controller, rute) | **Belum dijalankan.** Disalin ke proyek Laravel Anda |
 | `docs/state-machine.mmd` | Diagram status (dihasilkan dari kode) | Jangan diedit tangan |
@@ -34,21 +34,28 @@ Uji integrasi memakai PostgreSQL asli dan membuat serta menghapus skema sementar
 
 ## Status verifikasi (jujur)
 
-**Sudah dijalankan** (sandbox, PostgreSQL 16, PHP 8.3):
+**Sudah dijalankan** (sandbox, PostgreSQL 16, PHP 8.3), semuanya lewat `bash tools/run-tests.sh`:
 
 - State machine: 262 pernyataan lulus, termasuk matriks lengkap pasangan (dari, ke) yang tak terdefinisi.
-- `AuthService` ke PostgreSQL: 50 pernyataan lulus (token hanya tersimpan sebagai hash, rotasi refresh, pencabutan sesi, anonimisasi akun).
-- `ReportTransitions` ke PostgreSQL: 39 pernyataan lulus, termasuk **klaim serempak lewat dua proses terpisah**
-  (kunci baris `SELECT ... FOR UPDATE`), atomisitas status + riwayat, dan pencegahan pemakaian ulang persetujuan buka kembali.
+- `AuthService`: 50 lulus (token hanya tersimpan sebagai hash, rotasi refresh, pencabutan sesi, anonimisasi akun).
+- `ReportTransitions`: 39 lulus, termasuk **klaim serempak lewat dua proses terpisah** (kunci baris `SELECT ... FOR UPDATE`),
+  atomisitas status + riwayat, dan pencegahan pemakaian ulang persetujuan buka kembali.
+- `ReportService`: 79 lulus (validasi, draft idempoten, visibilitas, paginasi kursor tanpa duplikat/celah, alasan dan hasil AI hanya untuk pemilik/moderator).
+- `AnalysisProcessor`: 28 lulus (AI mati -> Perlu Review, ambang null -> tidak ada yang lolos, auto-publish, area pilot, kirim ulang hanya menganalisis foto baru, balapan saat AI berjalan).
 - Skema: dimuat tanpa galat; 11 uji constraint lulus. OpenAPI valid; enum status identik di OpenAPI, SQL, dan PHP.
-- **Uji mutasi:** merusak kode inti satu per satu (hapus `FOR UPDATE`, tidak menulis riwayat, `isOwner` selalu benar,
-  token mentah disimpan, refresh tidak dirotasi, dll.) membuat uji **gagal**. Artinya uji tidak kosong.
+- **Uji mutasi:** merusak kode inti satu per satu (hapus `FOR UPDATE`, draft terlihat orang lain, alasan moderasi bocor, paginasi `<=`,
+  AI gagal diabaikan, lolos tanpa ambang, analisis ulang semua foto, area pilot diabaikan, dll.) membuat uji **gagal**. Uji tidak kosong.
+- **Satu cacat desain ditemukan dan diperbaiki saat menulis uji:** dua flag publikasi otomatis yang bisa berbeda membuat laporan nyangkut
+  diam-diam di `menunggu_analisis`. Kini flag hanya ada di `ReportTransitions`, dan galat transisi tak terduga tidak lagi ditelan.
 
 **Belum ada / belum diverifikasi:**
 
 - **`backend-overlay/` (Laravel) hanya di-lint, belum dijalankan**: Packagist tidak terjangkau dari sandbox, jadi Laravel tidak bisa dipasang di sini.
   Perlakukan sebagai titik awal; laporkan galat apa pun saat pertama kali dijalankan.
-- Belum ada endpoint selain auth dan `/me` (laporan, komunitas, klaim, moderasi, admin masih berupa kontrak di OpenAPI).
+- Endpoint yang sudah punya controller (belum dijalankan): auth, `/me`, kategori, laporan (buat/ubah/foto/kirim/daftar/detail/riwayat/analisis), berkas foto.
+  Komunitas, klaim/bukti, moderasi, dan admin masih berupa kontrak di OpenAPI.
+- **AI masih stub.** Selama ambang belum ditetapkan dari evaluasi model (Keputusan #8), tidak ada laporan yang lolos otomatis; semuanya ke Perlu Review.
+- Unggah foto di controller (deteksi MIME, simpan berkas) belum diuji; logika di balik `addImage` sudah. Metadata EXIF belum dihapus (Keputusan #20).
 - Belum ada kode Android, web admin, atau layanan AI. Tidak ada yang dikompilasi.
 - `docs/state-machine.mmd` belum dirender. Alamat server di OpenAPI masih placeholder.
 - Pengiriman email verifikasi belum punya penyedia SMTP (lihat `docs/DECISIONS.md`).
@@ -90,7 +97,7 @@ Berikan `docs/openapi.yaml`, `db/schema.sql`, dan `core/src/` sebagai konteks. C
 > `ReportTransitions::transition()`. Tulis uji untuk 403 (peran/kepemilikan) dan 409 (transisi tidak sah) setiap endpoint.
 > Jika kontrak tampak salah, berhenti dan laporkan, jangan menyesuaikan sendiri.
 
-Urutan modul: (1) Auth + `/me` [kerangka ada], (2) Laporan + gambar + submit + stub AI, (3) Admin keputusan,
+Urutan modul: (1) Auth + `/me` [inti teruji, controller belum dijalankan], (2) Laporan + gambar + submit + stub AI [inti teruji, controller belum dijalankan], (3) Admin keputusan,
 (4) Daftar publik + peta + konfirmasi + flag, (5) Klaim + bukti + keputusan bukti, (6) Android: auth, buat laporan + Room,
 (7) Android: daftar/peta/detail, (8) Web admin, (9) layanan AI.
 

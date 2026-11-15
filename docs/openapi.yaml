@@ -281,6 +281,16 @@ paths:
       parameters: [{$ref: '#/components/parameters/IdPath'}]
       responses:
         '200': {description: Riwayat, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/StatusHistoryItem'}}}}}
+  /images/{id}/file:
+    get:
+      tags: [Laporan]
+      operationId: getImageFile
+      summary: "Berkas foto laporan. Terautentikasi (tanpa URL bertanda tangan); aturan visibilitas sama dengan laporannya."
+      x-roles: [pengguna, volunteer, admin]
+      parameters: [{$ref: '#/components/parameters/IdPath'}]
+      responses:
+        '200': {description: Berkas gambar, content: {image/jpeg: {schema: {type: string, format: binary}}, image/png: {schema: {type: string, format: binary}}, image/webp: {schema: {type: string, format: binary}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
   /reports/{id}/analysis:
     get:
       tags: [Laporan]
@@ -658,7 +668,7 @@ components:
       required: [id, url]
       properties:
         id: {type: string, format: uuid}
-        url: {type: string, description: URL bertanda tangan berumur pendek}
+        url: {type: string, description: 'Jalur relatif /api/v1/images/{id}/file; wajib mengirim Authorization'}
     Report:
       type: object
       required: [id, status, category_id, title, location, created_at]

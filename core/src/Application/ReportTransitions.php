@@ -36,6 +36,12 @@ final class ReportTransitions
         $this->machine = new ReportStateMachine();
     }
 
+    /** Satu-satunya sumber kebenaran flag publikasi otomatis (Keputusan #1). Komponen lain MEMBACA dari sini. */
+    public function autoPublishEnabled(): bool
+    {
+        return $this->autoPublishEnabled;
+    }
+
     /**
      * @throws \App\Domain\TransitionException 403/409/422 dari state machine
      * @throws ApiException 404 bila laporan tidak ada

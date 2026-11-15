@@ -1,6 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\ImageController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\MeController;
 use App\Http\Middleware\AuthenticateToken;
 use App\Http\Middleware\EnsureRole;
@@ -23,6 +26,20 @@ Route::middleware(AuthenticateToken::class)->group(function () {
     Route::delete('me', [MeController::class, 'destroy']);
     Route::post('me/password', [MeController::class, 'changePassword']);
 
-    // Modul berikutnya (lihat README "urutan modul"): laporan, komunitas, klaim, moderasi, admin.
+    Route::get('categories', [CategoryController::class, 'index']);
+
+    // Urutan penting: 'reports/mine' HARUS di atas 'reports/{id}'.
+    Route::get('reports/mine', [ReportController::class, 'mine']);
+    Route::get('reports', [ReportController::class, 'index']);
+    Route::post('reports', [ReportController::class, 'store']);
+    Route::get('reports/{id}', [ReportController::class, 'show']);
+    Route::patch('reports/{id}', [ReportController::class, 'update']);
+    Route::post('reports/{id}/images', [ReportController::class, 'uploadImage']);
+    Route::post('reports/{id}/submit', [ReportController::class, 'submit']);
+    Route::get('reports/{id}/history', [ReportController::class, 'history']);
+    Route::get('reports/{id}/analysis', [ReportController::class, 'analysis']);
+    Route::get('images/{id}/file', [ImageController::class, 'file']);
+
+    // Modul berikutnya (lihat README "urutan modul"): komunitas, klaim, moderasi, admin.
     // Contoh pemasangan peran: Route::middleware(EnsureRole::class . ':admin')->prefix('admin')->group(...)
 });

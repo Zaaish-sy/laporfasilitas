@@ -9,4 +9,6 @@ run "OpenAPI = SQL = PHP"            python3 tools/check_parity.py
 run "State machine"                  php core/tests/StateMachineTest.php
 run "AuthService (PostgreSQL)"       php core/tests/AuthServiceDbTest.php
 run "ReportTransitions (PostgreSQL)" php core/tests/ReportTransitionsDbTest.php
+run "ReportService (PostgreSQL)"     php core/tests/ReportServiceDbTest.php
+run "AnalysisProcessor (PostgreSQL)" php core/tests/AnalysisProcessorDbTest.php
 [ $fail -eq 0 ] && echo "SEMUA LULUS" || { echo "ADA YANG GAGAL"; exit 1; }
