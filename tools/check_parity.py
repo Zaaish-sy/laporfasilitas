@@ -14,13 +14,13 @@ errors = []
 api = spec["components"]["schemas"]["ReportStatus"]["enum"]
 sql = open("db/schema.sql", encoding="utf-8").read()
 sql_enum = re.findall(r"'([a-z_]+)'", re.search(r"CREATE TYPE report_status AS ENUM \((.*?)\);", sql, re.S).group(1))
-php = re.findall(r"case \w+ = '([a-z_]+)';", open("backend/app/Domain/ReportStatus.php", encoding="utf-8").read())
+php = re.findall(r"case \w+ = '([a-z_]+)';", open("core/src/Domain/ReportStatus.php", encoding="utf-8").read())
 if api != sql_enum:
     errors.append("enum status OpenAPI != SQL")
 if api != php:
     errors.append("enum status OpenAPI != PHP")
 
-rules = set(re.findall(r"new Transition\('(T-[0-9a-z]+)'", open("backend/app/Domain/ReportStateMachine.php", encoding="utf-8").read()))
+rules = set(re.findall(r"new Transition\('(T-[0-9a-z]+)'", open("core/src/Domain/ReportStateMachine.php", encoding="utf-8").read()))
 used = {t for p in spec["paths"].values() for op in p.values() if isinstance(op, dict) for t in op.get("x-transition", [])}
 unknown = used - rules
 if unknown:

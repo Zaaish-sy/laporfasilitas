@@ -27,9 +27,10 @@ Status: **usulan bawaan, belum dikonfirmasi pemilik proyek.** Ubah baris mana pu
 | 11 | Komentar | Tidak ada; cukup konfirmasi | Entitas baru |
 | 12 | Infrastruktur | Laravel + PostgreSQL (PRD); admin sebagai halaman web di aplikasi yang sama; foto di penyimpanan server; **tanpa PostGIS** (lat/lon + bounding box) | Skema lokasi |
 | 13 | Notifikasi | Polling dalam aplikasi; FCM ditunda | Endpoint device |
-| 14 | Login | Email + password, bearer token (masa berlaku belum ditentukan) | Auth |
+| 14 | Login | Email + password, token bearer opak (hanya hash disimpan) dengan refresh token yang dirotasi. Masa berlaku usulan: access 1 jam, refresh 30 hari (#18 terbuka) | Auth |
+| 15 | Verifikasi email | Tabel dan alur ada; **belum ada penyedia SMTP**. Untuk uji tertutup, syarat verifikasi dimatikan (`LAPOR_REQUIRE_EMAIL_VERIFICATION=false`) agar 12 tester tidak terblokir | Keputusan penyedia email |
 
-Keputusan yang **belum** bisa diputuskan sendiri (butuh data atau pihak lain): kategori dan model AI beserta ambangnya;
+Keputusan yang **belum** bisa diputuskan sendiri (butuh data atau pihak lain): penyedia email/SMTP; kategori dan model AI beserta ambangnya;
 batas ukuran/jumlah foto dan angka rate limit; retensi foto dan data; ketentuan nama pengembang di toko (prodi).
 
 ## 3. Cakupan

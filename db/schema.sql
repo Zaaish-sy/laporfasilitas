@@ -33,7 +33,31 @@ CREATE TABLE users (
     role            app_role NOT NULL DEFAULT 'pengguna',
     email_verified_at timestamptz,
     created_at      timestamptz NOT NULL DEFAULT now(),
+    disabled_at     timestamptz,                     -- dinonaktifkan admin (UC-18); tidak bisa login
     deleted_at      timestamptz                      -- anonimisasi; riwayat laporan tetap utuh
+);
+
+-- Token bearer opak. Hanya HASH (sha256) yang disimpan. Satu login = sepasang access+refresh (pair_id).
+CREATE TABLE api_tokens (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    pair_id     uuid NOT NULL,
+    kind        text NOT NULL CHECK (kind IN ('access', 'refresh')),
+    token_hash  char(64) NOT NULL UNIQUE,
+    expires_at  timestamptz NOT NULL,
+    revoked_at  timestamptz,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_tokens_user ON api_tokens (user_id);
+CREATE INDEX ix_tokens_pair ON api_tokens (pair_id);
+
+CREATE TABLE email_verifications (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash  char(64) NOT NULL UNIQUE,
+    expires_at  timestamptz NOT NULL,
+    used_at     timestamptz,
+    created_at  timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE categories (
